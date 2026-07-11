@@ -1,0 +1,22 @@
+train: true
+test: true
+fine_tune_type: lora
+optimizer: adamw
+seed: 42
+num_layers: 16
+batch_size: 4
+iters: 2200
+val_batches: 50
+test_batches: 100
+learning_rate: 1.0e-5
+steps_per_report: 20
+steps_per_eval: 200
+save_every: 400
+max_seq_length: 512
+grad_checkpoint: true
+grad_accumulation_steps: 2
+mask_prompt: true
+lora_parameters:
+  rank: 8
+  dropout: 0.05
+  scale: 20.0

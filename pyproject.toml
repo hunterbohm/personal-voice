@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "personal-voice"
+version = "0.1.0"
+description = "Local-first retrieval and optional style rendering from your own messages"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = []
+keywords = ["agents", "local-first", "mlx", "privacy", "rag", "writing-style"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Communications",
+]
+
+[project.optional-dependencies]
+renderer = [
+  "mlx-lm==0.31.1",
+  "transformers==5.5.0",
+]
+
+[project.scripts]
+personal-voice = "personal_voice.cli:main"
+
+[project.urls]
+Issues = "https://github.com/hunterbohm/personal-voice/issues"
+Source = "https://github.com/hunterbohm/personal-voice"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.9",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.uv]
+exclude-newer = "7 days"
