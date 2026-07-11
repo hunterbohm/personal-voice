@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -12,6 +13,8 @@ from pathlib import Path
 
 from personal_voice.local_only import inside_git_worktree, require_private_input
 from personal_voice.pairing import pair_replies, standalone_replies
+
+_CLI_NAME = "personal-voice"
 
 
 def _default_database() -> Path:
@@ -32,8 +35,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="personal-voice",
         description="Build and query a private personal-voice index.",
+        epilog=(
+            "Advanced renderer setup and evaluation commands are documented in "
+            "docs/renderer.md."
+        ),
     )
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
 
     build = commands.add_parser("build", help="Build the private example index")
     build.add_argument("--imessage", action="append", type=Path, default=[])
@@ -61,7 +68,12 @@ def _parser() -> argparse.ArgumentParser:
         "--query",
         help="synthetic query text; omit for private content and write it through stdin",
     )
-    retrieve.add_argument("--medium", default="auto", help=argparse.SUPPRESS)
+    retrieve.add_argument(
+        "--medium",
+        choices=("auto", "text", "dm", "email", "public"),
+        default="auto",
+        help="destination hint used to rank examples (default: auto)",
+    )
     retrieve.add_argument("--limit", type=int, default=8)
     retrieve.add_argument("--json", action="store_true")
     retrieve.set_defaults(handler=_retrieve)
@@ -79,7 +91,14 @@ def _parser() -> argparse.ArgumentParser:
     selftest = commands.add_parser("selftest", help="Exercise the index with synthetic text only")
     selftest.set_defaults(handler=_selftest)
 
-    render = commands.add_parser("render", help="Apply the optional local voice renderer")
+    render = commands.add_parser(
+        "render",
+        help="Apply the optional local voice renderer",
+        description=(
+            "Read one JSON object from stdin with draft, medium, and preserve_literals; "
+            "write one guarded JSON result."
+        ),
+    )
     render.add_argument(
         "--manifest",
         type=Path,
@@ -88,7 +107,13 @@ def _parser() -> argparse.ArgumentParser:
     render.set_defaults(handler=_render)
 
     preview = commands.add_parser(
-        "preview", help="Interactively test the active or staged voice renderer"
+        "try",
+        aliases=["preview"],
+        help="Try the active or staged renderer on a finished draft",
+        description=(
+            "Interactively test wording only. The renderer does not decide what the reply says "
+            "and this command never sends anything."
+        ),
     )
     preview.add_argument("--medium", choices=("text", "dm", "email", "public"))
     preview_candidate = preview.add_mutually_exclusive_group()
@@ -97,7 +122,7 @@ def _parser() -> argparse.ArgumentParser:
     preview.set_defaults(handler=_preview)
 
     renderer_prepare = commands.add_parser(
-        "renderer-prepare", help="Prepare a private style-renderer workspace"
+        "renderer-prepare", description="Prepare a private style-renderer workspace"
     )
     renderer_prepare.add_argument("--db", type=Path, default=_default_database())
     renderer_prepare.add_argument(
@@ -114,7 +139,8 @@ def _parser() -> argparse.ArgumentParser:
     renderer_prepare.set_defaults(handler=_renderer_prepare)
 
     renderer_neutralize = commands.add_parser(
-        "renderer-neutralize", help="Create canonical drafts with a local teacher model"
+        "renderer-neutralize",
+        description="Create canonical drafts with a local teacher model",
     )
     renderer_neutralize.add_argument(
         "--workspace",
@@ -127,7 +153,7 @@ def _parser() -> argparse.ArgumentParser:
     renderer_neutralize.set_defaults(handler=_renderer_neutralize)
 
     renderer_export = commands.add_parser(
-        "renderer-export", help="Export prompt-masked MLX training data"
+        "renderer-export", description="Export prompt-masked MLX training data"
     )
     renderer_export.add_argument(
         "--workspace",
@@ -148,7 +174,7 @@ def _parser() -> argparse.ArgumentParser:
     renderer_export.set_defaults(handler=_renderer_export)
 
     renderer_stats = commands.add_parser(
-        "renderer-data-stats", help="Show aggregate renderer-data counts"
+        "renderer-data-stats", description="Show aggregate renderer-data counts"
     )
     renderer_stats.add_argument(
         "--workspace",
@@ -158,7 +184,8 @@ def _parser() -> argparse.ArgumentParser:
     renderer_stats.set_defaults(handler=_renderer_data_stats)
 
     renderer_audit = commands.add_parser(
-        "renderer-audit", help="Audit neutral pairs with a stronger local semantic judge"
+        "renderer-audit",
+        description="Audit neutral pairs with a stronger local semantic judge",
     )
     renderer_audit.add_argument(
         "--workspace",
@@ -170,7 +197,7 @@ def _parser() -> argparse.ArgumentParser:
     renderer_audit.set_defaults(handler=_renderer_audit)
 
     renderer_install = commands.add_parser(
-        "renderer-install", help="Stage a private versioned renderer adapter"
+        "renderer-install", description="Stage a private versioned renderer adapter"
     )
     renderer_install.add_argument("--root", type=Path, default=_default_renderer_root())
     renderer_install.add_argument("--model-path", type=Path, required=True)
@@ -181,7 +208,8 @@ def _parser() -> argparse.ArgumentParser:
     renderer_install.set_defaults(handler=_renderer_install)
 
     renderer_activate = commands.add_parser(
-        "renderer-activate", help="Activate an installed renderer after evaluation"
+        "renderer-activate",
+        description="Activate an installed renderer after evaluation",
     )
     renderer_activate.add_argument("--root", type=Path, default=_default_renderer_root())
     renderer_activate.add_argument("--version", required=True)
@@ -209,7 +237,8 @@ def _parser() -> argparse.ArgumentParser:
     renderer_activate.set_defaults(handler=_renderer_activate)
 
     renderer_doctor_parser = commands.add_parser(
-        "renderer-doctor", help="Check whether the optional local renderer is usable"
+        "renderer-doctor",
+        description="Check whether the optional local renderer is usable",
     )
     renderer_doctor_parser.add_argument(
         "--manifest",
@@ -219,7 +248,8 @@ def _parser() -> argparse.ArgumentParser:
     renderer_doctor_parser.set_defaults(handler=_renderer_doctor)
 
     renderer_evaluate = commands.add_parser(
-        "renderer-evaluate", help="Evaluate aggregate held-out renderer style movement"
+        "renderer-evaluate",
+        description="Evaluate aggregate held-out renderer style movement",
     )
     renderer_evaluate.add_argument(
         "--manifest",
@@ -238,7 +268,8 @@ def _parser() -> argparse.ArgumentParser:
     renderer_evaluate.set_defaults(handler=_renderer_evaluate)
 
     blind_add = commands.add_parser(
-        "renderer-blind-add", help="Add one private retrieval-versus-renderer draft comparison"
+        "renderer-blind-add",
+        description="Add one private retrieval-versus-renderer draft comparison",
     )
     blind_add.add_argument(
         "--manifest",
@@ -254,7 +285,7 @@ def _parser() -> argparse.ArgumentParser:
     blind_add.set_defaults(handler=_renderer_blind_add)
 
     blind_next = commands.add_parser(
-        "renderer-blind-next", help="Show the next private blind comparison"
+        "renderer-blind-next", description="Show the next private blind comparison"
     )
     blind_next.add_argument(
         "--pack",
@@ -263,7 +294,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     blind_next.set_defaults(handler=_renderer_blind_next)
 
-    blind_vote = commands.add_parser("renderer-blind-vote", help="Rate one blind comparison")
+    blind_vote = commands.add_parser(
+        "renderer-blind-vote", description="Rate one blind comparison"
+    )
     blind_vote.add_argument(
         "--pack",
         type=Path,
@@ -275,7 +308,8 @@ def _parser() -> argparse.ArgumentParser:
     blind_vote.set_defaults(handler=_renderer_blind_vote)
 
     blind_stats = commands.add_parser(
-        "renderer-blind-stats", help="Show aggregate hidden-label preference counts"
+        "renderer-blind-stats",
+        description="Show aggregate hidden-label preference counts",
     )
     blind_stats.add_argument(
         "--pack",
@@ -290,6 +324,52 @@ def _parser() -> argparse.ArgumentParser:
     )
     blind_stats.set_defaults(handler=_renderer_blind_stats)
     return parser
+
+
+def _quickstart() -> int:
+    print(f"{_CLI_NAME} quickstart")
+    print(f"1. Check the install: {_CLI_NAME} selftest")
+    print(f"2. Build your index: {_CLI_NAME} build --help")
+    print(f"3. Check your setup: {_CLI_NAME} doctor")
+    print(f"Retrieve style examples: {_CLI_NAME} retrieve --help")
+    print(f"Try a staged renderer from the checkout: uv run {_CLI_NAME} try")
+    return 0
+
+
+def _index_stats(database: Path) -> dict:
+    from personal_voice.store import store_stats
+
+    try:
+        return store_stats(database.expanduser())
+    except FileNotFoundError as error:
+        raise SystemExit(
+            f"private index not found; run '{_CLI_NAME} build --help' to create it"
+        ) from error
+    except ValueError as error:
+        raise SystemExit(
+            f"private index is invalid; rebuild it with '{_CLI_NAME} build'"
+        ) from error
+    except PermissionError as error:
+        raise SystemExit("private index cannot be read; check its permissions") from error
+    except (OSError, sqlite3.Error) as error:
+        raise SystemExit("private index cannot be read; check its permissions") from error
+
+
+def _require_renderer_workspace(workspace: Path) -> Path:
+    from personal_voice.renderer_data import renderer_workspace_stats
+
+    resolved = workspace.expanduser()
+    if not resolved.is_file():
+        raise SystemExit(
+            f"renderer workspace not found; run '{_CLI_NAME} renderer-prepare' first"
+        )
+    try:
+        renderer_workspace_stats(resolved)
+    except (OSError, ValueError, sqlite3.Error) as error:
+        raise SystemExit(
+            f"renderer workspace is invalid; recreate it with '{_CLI_NAME} renderer-prepare'"
+        ) from error
+    return resolved
 
 
 def _dedupe(examples: list[dict]) -> list[dict]:
@@ -379,10 +459,23 @@ def _build(args: argparse.Namespace) -> int:
 def _retrieve(args: argparse.Namespace) -> int:
     from personal_voice.store import retrieve_examples
 
+    database = args.db.expanduser()
+    _index_stats(database)
     query = str(args.query if args.query is not None else sys.stdin.read()).strip()
     if not query:
         raise SystemExit("retrieve requires query text through stdin or --query")
-    examples = retrieve_examples(args.db.expanduser(), query, medium=args.medium, limit=args.limit)
+    try:
+        examples = retrieve_examples(database, query, medium=args.medium, limit=args.limit)
+    except FileNotFoundError as error:
+        raise SystemExit(
+            f"private index not found; run '{_CLI_NAME} build --help' to create it"
+        ) from error
+    except ValueError as error:
+        raise SystemExit(
+            f"private index is invalid; rebuild it with '{_CLI_NAME} build'"
+        ) from error
+    except (OSError, sqlite3.Error) as error:
+        raise SystemExit("private index cannot be read; check its permissions") from error
     if args.json:
         print(json.dumps({"count": len(examples), "examples": examples}, sort_keys=True))
     else:
@@ -399,9 +492,7 @@ def _retrieve(args: argparse.Namespace) -> int:
 
 
 def _stats(args: argparse.Namespace) -> int:
-    from personal_voice.store import store_stats
-
-    stats = store_stats(args.db.expanduser())
+    stats = _index_stats(args.db)
     if args.json:
         print(json.dumps(stats, sort_keys=True))
     else:
@@ -436,6 +527,8 @@ def _doctor(args: argparse.Namespace) -> int:
         print(f"database: {result['database']}")
         if "total" in result:
             print(f"examples: {result['total']}")
+        else:
+            print(f"next: {_CLI_NAME} build --help")
     return 0 if result["ok"] else 1
 
 
@@ -456,7 +549,16 @@ def _selftest(_args: argparse.Namespace | None = None) -> int:
         database = Path(directory) / "selftest.sqlite"
         build_store(database, [example])
         ok = bool(retrieve_examples(database, "test", limit=1))
-    print(json.dumps({"ok": ok}))
+    print(
+        json.dumps(
+            {
+                "next": f"{_CLI_NAME} doctor",
+                "ok": ok,
+                "scope": "synthetic plumbing only",
+            },
+            sort_keys=True,
+        )
+    )
     return 0 if ok else 1
 
 
@@ -497,9 +599,20 @@ def _render(args: argparse.Namespace) -> int:
 def _preview(args: argparse.Namespace) -> int:
     from personal_voice.renderer import load_mlx_backend, render_draft
 
+    manifest = (
+        args.manifest.expanduser() if args.manifest else _preview_renderer_manifest(args.version)
+    )
+    try:
+        backend = load_mlx_backend(manifest)
+    except (FileNotFoundError, PermissionError, ValueError, json.JSONDecodeError) as error:
+        raise SystemExit("no usable active or staged voice renderer was found") from error
+
     medium = args.medium
     if medium is None:
-        medium = input("Medium [text]: ").strip().casefold() or "text"
+        try:
+            medium = input("Medium [text]: ").strip().casefold() or "text"
+        except EOFError as error:
+            raise SystemExit("preview cancelled: no input received") from error
     if medium not in {"text", "dm", "email", "public"}:
         raise SystemExit("medium must be text, dm, email, or public")
     print("Paste the finished draft. Type /done on its own line when finished.")
@@ -517,13 +630,6 @@ def _preview(args: argparse.Namespace) -> int:
     except EOFError:
         exact = ""
     preserve_literals = [value.strip() for value in exact.split(",") if value.strip()]
-    manifest = (
-        args.manifest.expanduser() if args.manifest else _preview_renderer_manifest(args.version)
-    )
-    try:
-        backend = load_mlx_backend(manifest)
-    except (FileNotFoundError, PermissionError, ValueError, json.JSONDecodeError) as error:
-        raise SystemExit("no usable active or staged voice renderer was found") from error
     result = render_draft(draft, medium, backend, preserve_literals=preserve_literals)
     print(f"\nCandidate: {backend.version}")
     print(f"Medium: {medium}")
@@ -573,6 +679,7 @@ def _preview_renderer_manifest(version: str | None) -> Path:
 def _renderer_prepare(args: argparse.Namespace) -> int:
     from personal_voice.renderer_data import prepare_renderer_workspace
 
+    _index_stats(args.db)
     stats = prepare_renderer_workspace(
         args.db,
         args.workspace,
@@ -592,11 +699,13 @@ def _renderer_prepare(args: argparse.Namespace) -> int:
 def _renderer_neutralize(args: argparse.Namespace) -> int:
     from personal_voice.renderer_data import OllamaNeutralizer, neutralize_renderer_workspace
 
+    workspace = _require_renderer_workspace(args.workspace)
+
     def report(progress: dict[str, int]) -> None:
         print(json.dumps({"neutralize_progress": progress}, sort_keys=True), file=sys.stderr)
 
     stats = neutralize_renderer_workspace(
-        args.workspace,
+        workspace,
         OllamaNeutralizer(args.model),
         limit=args.limit,
         progress=report,
@@ -610,8 +719,9 @@ def _renderer_export(args: argparse.Namespace) -> int:
     from personal_voice.renderer_data import export_renderer_dataset
     from personal_voice.training_data import load_renderer_tokenizer
 
+    workspace = _require_renderer_workspace(args.workspace)
     stats = export_renderer_dataset(
-        args.workspace,
+        workspace,
         args.output,
         tokenizer=load_renderer_tokenizer(args.model),
         require_semantic_audit=True,
@@ -623,7 +733,8 @@ def _renderer_export(args: argparse.Namespace) -> int:
 def _renderer_data_stats(args: argparse.Namespace) -> int:
     from personal_voice.renderer_data import renderer_workspace_stats
 
-    print(json.dumps(renderer_workspace_stats(args.workspace), sort_keys=True))
+    workspace = _require_renderer_workspace(args.workspace)
+    print(json.dumps(renderer_workspace_stats(workspace), sort_keys=True))
     return 0
 
 
@@ -639,16 +750,17 @@ def _renderer_audit(args: argparse.Namespace) -> int:
     def report(progress: dict[str, int]) -> None:
         print(json.dumps({"semantic_audit_progress": progress}, sort_keys=True), file=sys.stderr)
 
-    finalize_renderer_workspace(args.workspace)
-    existing = semantic_audit_stats(args.workspace)
+    workspace = _require_renderer_workspace(args.workspace)
+    finalize_renderer_workspace(workspace)
+    existing = semantic_audit_stats(workspace)
     if (
         not existing["total"]
         or existing.get("unchecked_ready")
         or existing.get("legacy_shape_pass")
     ):
-        prepare_semantic_audit(args.workspace)
+        prepare_semantic_audit(workspace)
     result = audit_renderer_workspace(
-        args.workspace,
+        workspace,
         OllamaSemanticJudge(args.model),
         batch_size=args.batch_size,
         progress=report,
@@ -797,4 +909,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI and return an exit status."""
 
     args = _parser().parse_args(argv)
+    if not hasattr(args, "handler"):
+        return _quickstart()
     return args.handler(args)

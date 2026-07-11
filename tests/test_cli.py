@@ -1,5 +1,6 @@
 import io
 import json
+import sqlite3
 import zipfile
 
 import pytest
@@ -67,6 +68,120 @@ def _install_synthetic_renderer(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("PERSONAL_VOICE_MLX_GENERATE", str(executable))
     return manifest
+
+
+def test_bare_cli_prints_a_small_quickstart(capsys) -> None:
+    assert main([]) == 0
+
+    output = capsys.readouterr().out
+    assert "personal-voice quickstart" in output
+    assert "personal-voice selftest" in output
+    assert "personal-voice build --help" in output
+    assert "personal-voice doctor" in output
+
+
+def test_default_help_keeps_advanced_renderer_commands_out_of_the_way(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["--help"])
+
+    assert error.value.code == 0
+    output = capsys.readouterr().out
+    assert "try (preview)" in output
+    assert "renderer-neutralize" not in output
+    assert "docs/renderer.md" in output
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ["stats", "--json"],
+        ["retrieve", "--query", "synthetic scheduling question", "--json"],
+        ["renderer-prepare"],
+    ),
+)
+def test_missing_index_errors_are_actionable_without_paths(tmp_path, arguments) -> None:
+    database = tmp_path / "private-user-name" / "missing.sqlite"
+    command = [*arguments[:1], "--db", str(database), *arguments[1:]]
+
+    with pytest.raises(SystemExit, match="private index not found") as error:
+        main(command)
+
+    assert str(database) not in str(error.value)
+    assert "personal-voice build" in str(error.value)
+
+
+@pytest.mark.parametrize("command", ("stats", "retrieve"))
+def test_invalid_index_errors_are_actionable_without_paths(tmp_path, command) -> None:
+    database = tmp_path / "private-user-name" / "invalid.sqlite"
+    database.parent.mkdir()
+    database.write_text("not a SQLite index")
+    arguments = [command, "--db", str(database)]
+    if command == "retrieve":
+        arguments.extend(("--query", "synthetic scheduling question"))
+
+    with pytest.raises(SystemExit, match="private index is invalid") as error:
+        main(arguments)
+
+    assert str(database) not in str(error.value)
+    assert "personal-voice build" in str(error.value)
+
+
+def test_retrieve_checks_the_index_before_reading_private_stdin(tmp_path, monkeypatch) -> None:
+    private_input = io.StringIO("synthetic private draft")
+    monkeypatch.setattr("sys.stdin", private_input)
+
+    with pytest.raises(SystemExit, match="private index not found"):
+        main(["retrieve", "--db", str(tmp_path / "missing.sqlite")])
+
+    assert private_input.tell() == 0
+
+
+@pytest.mark.parametrize("command", ("stats", "retrieve"))
+def test_index_open_errors_do_not_expose_paths(tmp_path, monkeypatch, command) -> None:
+    database = tmp_path / "private-user-name" / "corpus.sqlite"
+
+    def fail_to_open(_path):
+        raise sqlite3.OperationalError(f"unable to open {database}")
+
+    monkeypatch.setattr("personal_voice.store.store_stats", fail_to_open)
+    arguments = [command, "--db", str(database)]
+    if command == "retrieve":
+        arguments.extend(("--query", "synthetic scheduling question"))
+
+    with pytest.raises(SystemExit, match="private index cannot be read") as error:
+        main(arguments)
+
+    assert str(database) not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ("renderer-neutralize", "renderer-data-stats", "renderer-audit"),
+)
+def test_missing_renderer_workspace_errors_without_a_traceback(tmp_path, command) -> None:
+    workspace = tmp_path / "private-user-name" / "missing.sqlite"
+
+    with pytest.raises(SystemExit, match="renderer workspace not found") as error:
+        main([command, "--workspace", str(workspace)])
+
+    assert str(workspace) not in str(error.value)
+    assert "renderer-prepare" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ("renderer-neutralize", "renderer-data-stats", "renderer-audit"),
+)
+def test_invalid_renderer_workspace_errors_without_a_traceback(tmp_path, command) -> None:
+    workspace = tmp_path / "private-user-name" / "invalid.sqlite"
+    workspace.parent.mkdir()
+    workspace.write_text("not a SQLite workspace")
+
+    with pytest.raises(SystemExit, match="renderer workspace is invalid") as error:
+        main([command, "--workspace", str(workspace)])
+
+    assert str(workspace) not in str(error.value)
+    assert "renderer-prepare" in str(error.value)
 
 
 def test_build_and_retrieve_use_aggregate_output_then_return_examples(
@@ -164,6 +279,27 @@ def test_doctor_reports_a_missing_private_index_without_throwing(tmp_path, capsy
         "database": database.name,
         "exists": False,
         "ok": False,
+    }
+
+
+def test_human_doctor_explains_the_next_setup_step(tmp_path, capsys) -> None:
+    database = tmp_path / "missing.sqlite"
+
+    assert main(["doctor", "--db", str(database)]) == 1
+
+    output = capsys.readouterr().out
+    assert "personal-voice: not ready" in output
+    assert "next: personal-voice build --help" in output
+
+
+def test_selftest_labels_its_synthetic_scope(capsys) -> None:
+    assert main(["selftest"]) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result == {
+        "next": "personal-voice doctor",
+        "ok": True,
+        "scope": "synthetic plumbing only",
     }
 
 
@@ -385,6 +521,30 @@ def test_preview_is_a_simple_interactive_staged_renderer_interface(
     assert "Candidate: synthetic-adapter-v1" in output
     assert str(manifest) not in output
     assert not output.lstrip().startswith("{")
+
+
+def test_preview_checks_for_a_renderer_before_accepting_a_draft(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    monkeypatch.setenv("PERSONAL_VOICE_RENDERER_ROOT", str(tmp_path / "missing-renderer"))
+    private_draft = "synthetic draft that should never be read"
+    monkeypatch.setattr("sys.stdin", io.StringIO(private_draft))
+
+    with pytest.raises(SystemExit, match="no active or staged voice renderer"):
+        main(["preview", "--medium", "text"])
+
+    output = capsys.readouterr().out
+    assert "Paste the finished draft" not in output
+    assert private_draft not in output
+
+
+def test_preview_handles_end_of_input_without_a_traceback(tmp_path, monkeypatch) -> None:
+    manifest = _install_synthetic_renderer(tmp_path, monkeypatch)
+    monkeypatch.setenv("PERSONAL_VOICE_RENDERER_ROOT", str(manifest.parent.parent))
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+
+    with pytest.raises(SystemExit, match="preview cancelled"):
+        main(["preview"])
 
 
 def test_preview_explains_that_long_replies_keep_the_frontier_draft(

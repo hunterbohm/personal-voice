@@ -6,6 +6,7 @@ import pytest
 
 from personal_voice.renderer import (
     _candidate_manifest_sha256,
+    _mlx_generate_executable,
     activate_renderer_manifest,
     format_renderer_target,
     install_renderer_manifest,
@@ -30,6 +31,30 @@ class FakeBackend:
     def generate(self, medium: str, slotized_draft: str) -> str:
         result = self.transform(medium, slotized_draft)
         return result if self.raw else format_renderer_target(result)
+
+
+def test_mlx_executable_discovery_keeps_the_virtualenv_bin_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    real_bin = tmp_path / "runtime/bin"
+    real_bin.mkdir(parents=True)
+    real_python = real_bin / "python3"
+    real_python.write_text("#!/bin/sh\nexit 0\n")
+    real_python.chmod(0o700)
+
+    venv_bin = tmp_path / "venv/bin"
+    venv_bin.mkdir(parents=True)
+    linked_python = venv_bin / "python"
+    linked_python.symlink_to(real_python)
+    sibling = venv_bin / "mlx_lm.generate"
+    sibling.write_text("#!/bin/sh\nexit 0\n")
+    sibling.chmod(0o700)
+
+    monkeypatch.delenv("PERSONAL_VOICE_MLX_GENERATE", raising=False)
+    monkeypatch.setattr("personal_voice.renderer.sys.executable", str(linked_python))
+    monkeypatch.setattr("personal_voice.renderer.shutil.which", lambda _name: None)
+
+    assert _mlx_generate_executable() == str(sibling)
 
 
 def test_renderer_target_envelope_round_trips_and_rejects_wrappers() -> None:

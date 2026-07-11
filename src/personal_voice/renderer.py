@@ -966,7 +966,9 @@ def _mlx_generate_executable() -> str | None:
     if configured:
         candidate = Path(configured).expanduser()
         return str(candidate) if candidate.is_file() and os.access(candidate, os.X_OK) else None
-    sibling = Path(sys.executable).resolve().parent / "mlx_lm.generate"
+    # Keep the virtualenv's bin directory. Resolving a symlinked interpreter can
+    # jump to the base Python install and hide the console script beside it.
+    sibling = Path(sys.executable).expanduser().parent / "mlx_lm.generate"
     if sibling.is_file() and os.access(sibling, os.X_OK):
         return str(sibling)
     return shutil.which("mlx_lm.generate")

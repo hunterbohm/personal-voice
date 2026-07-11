@@ -100,7 +100,7 @@ uv run python scripts/renderer_privacy_probe.py \
   --count 1000
 ```
 
-Use `personal-voice preview` for a local manual comparison. Preview does not run the caller's semantic check and never activates a model.
+Use `uv run personal-voice try` from the renderer-enabled checkout for a local manual comparison (`preview` remains an alias). The command validates the renderer before accepting a draft. It does not run the caller's semantic check and never activates a model.
 
 ## 5. Blind evaluation and activation
 

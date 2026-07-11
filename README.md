@@ -23,7 +23,7 @@ The retriever supplies phrasing, rhythm, warmth, and level of formality. It is n
 
 ## Privacy boundary
 
-The project keeps generated data outside Git and creates private directories with mode `0700` and files with mode `0600`. Build, health, training, and aggregate evaluation commands avoid printing message text. `retrieve`, `preview`, and `renderer-blind-next` are deliberate exceptions: they show private text to the active drafter or evaluator.
+The project keeps generated data outside Git and creates private directories with mode `0700` and files with mode `0600`. Build, health, training, and aggregate evaluation commands avoid printing message text. `retrieve`, `try` (also available as `preview`), and `renderer-blind-next` are deliberate exceptions: they show private text to the active drafter or evaluator.
 
 That does not make the data anonymous. Your corpus still contains your words and other people's messages. If a cloud-hosted agent receives retrieved examples, those examples have left your machine. A fine-tuned adapter can also memorize training text. Read [docs/privacy.md](docs/privacy.md) before using real data.
 
@@ -36,6 +36,7 @@ git clone https://github.com/hunterbohm/personal-voice.git
 cd personal-voice
 uv tool install .
 personal-voice selftest
+personal-voice
 ```
 
 This puts `personal-voice` on your user PATH so agents can call it outside the checkout. For development, run `uv sync` and use `uv run personal-voice ...`.
@@ -129,6 +130,12 @@ done
 ```
 
 Start a new agent session after installation. Other agent runtimes can use the same `SKILL.md` as long as they can run local commands and write private input through process stdin.
+
+To manually test an installed staged renderer, use the short interactive command below. It checks that the renderer is usable before accepting a draft, never sends anything, and keeps the original draft whenever a guard rejects the rewrite.
+
+```bash
+uv run personal-voice try
+```
 
 ## Optional local renderer
 
