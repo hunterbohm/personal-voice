@@ -32,6 +32,8 @@ Do not paste retrieval output into shared chats, issue trackers, telemetry syste
 
 Use stdin for private query text and renderer drafts. Command-line arguments may appear in shell history and process listings. Use `--gmail-owner-file` for real account addresses rather than `--gmail-owner`.
 
+The separate `gog auth add` command requires an account address as an argument. Run that OAuth step yourself in a private, non-recorded terminal. For later export commands, read the address from the private owner file into `GOG_ACCOUNT` instead of writing it into agent commands or shell history.
+
 Terminal scrollback can still retain retrieval output, previews, and blind comparisons. Run private sessions without transcript capture when that matters.
 
 ## Fine-tuning risk

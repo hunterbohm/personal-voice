@@ -6,6 +6,16 @@ It builds a private SQLite index from messages you wrote, retrieves relevant exa
 
 This repository contains code and synthetic tests only. It contains no messages, email exports, contact identifiers, datasets, adapters, model weights, or private evaluation results.
 
+## Let an agent set it up
+
+Paste this into a coding agent running on the computer that holds your messages:
+
+```text
+Set up https://github.com/hunterbohm/personal-voice on this machine. Clone or update it, then read docs/agent-setup.md completely and follow it end to end. Do the work instead of just explaining it. Use only data sources I explicitly approve, obey every privacy gate, install and verify the drafting skill only for agent runtimes already present, and never send or publish anything. Stage and test the optional local renderer if this machine supports it, but do not activate it. Ask me only when the runbook marks a user action or permission gate.
+```
+
+The linked [agent setup runbook](docs/agent-setup.md) contains the full process.
+
 ## How it works
 
 ```text
@@ -55,38 +65,51 @@ You can combine any of these inputs:
 - the ZIP file from X's official data archive
 - decoded Gmail thread or message-page JSON exports
 
-For iMessage, follow the upstream snapshot and `prepare` workflow. This release was tested against `texts-to-transformer` commit `90419977f4b0ab80c7c160faa2adcbcc2bfe7943`. That extractor reads a consistent copy of `chat.db`, filters reactions and system rows, skips attachment-only messages, and replaces database identities with keyed pseudonyms. Copy the normalized output out of its Git worktree before building:
+Create the private storage root explicitly so both levels use mode `0700`:
 
 ```bash
+install -d -m 700 ~/.local/share/personal-voice
 install -d -m 700 ~/.local/share/personal-voice/sources
+```
+
+For iMessage, follow the upstream snapshot and `prepare` workflow after checking out `texts-to-transformer` commit `90419977f4b0ab80c7c160faa2adcbcc2bfe7943`. The [agent setup runbook](docs/agent-setup.md) has the exact extraction commands. That extractor reads a consistent copy of `chat.db`, filters reactions and system rows, skips attachment-only messages, and replaces database identities with keyed pseudonyms. Copy the normalized output out of its Git worktree before building:
+
+```bash
 install -m 600 work/extracted/messages.jsonl \
   ~/.local/share/personal-voice/sources/imessage.jsonl
 ```
 
 The normalized input contract is documented in [docs/data-contract.md](docs/data-contract.md).
 
-For Gmail, install [`gogcli`](https://github.com/openclaw/gogcli), authorize read-only Gmail access, and export complete message JSON inside the private source directory:
+For Gmail, install [`gogcli`](https://github.com/openclaw/gogcli) and create `gmail-owners.txt` with a private editor. Put one account address on each line and set the file to mode `0600`.
+
+`gog auth add` requires the account address as a process argument. Run this OAuth step yourself in a private, non-recorded terminal. The variable keeps the address out of shell history, but it can still be visible in the local process list while `gog` runs:
 
 ```bash
-gog auth add you@example.com \
+IFS= read -r GMAIL_OWNER < \
+  ~/.local/share/personal-voice/sources/gmail-owners.txt
+
+gog auth add "$GMAIL_OWNER" \
   --services gmail --readonly --gmail-scope readonly
 
 (
   umask 077
   cd ~/.local/share/personal-voice/sources
-  GOG_ACCOUNT=you@example.com gog gmail messages search 'in:anywhere' \
+  GOG_ACCOUNT="$GMAIL_OWNER" gog gmail messages search 'in:sent' \
     --all --full --json --gmail-no-send --no-input > gmail-page.json
 )
+
+unset GMAIL_OWNER
 ```
 
-Use `in:sent` instead when you want authored style examples without incoming-thread context. Put the same account address in `gmail-owners.txt`, one address per line, and keep that file mode `0600`.
+Use `in:anywhere` only when you explicitly want incoming-thread context and accept exporting a much broader slice of the mailbox.
 
 ## Build the private index
 
 Keep every source and output path outside the repository:
 
 ```bash
-uv run personal-voice build \
+personal-voice build \
   --imessage ~/.local/share/personal-voice/sources/imessage.jsonl \
   --x-archive ~/.local/share/personal-voice/sources/x-archive.zip \
   --gmail-export ~/.local/share/personal-voice/sources/gmail-page.json \
@@ -101,8 +124,8 @@ X ingestion removes long outreach templates repeated across several conversation
 Check the index without printing its contents:
 
 ```bash
-uv run personal-voice doctor --json
-uv run personal-voice stats --json
+personal-voice doctor --json
+personal-voice stats --json
 ```
 
 ## Retrieve examples
@@ -119,14 +142,14 @@ The JSON response contains private examples. Give them only to the model that is
 
 The reusable agent workflow is in [examples/personal-voice-skill/SKILL.md](examples/personal-voice-skill/SKILL.md). It is draft-only and never grants permission to send a message.
 
-Install that file in whichever runtimes should draft with the corpus:
+Install that file only into a runtime that is already present. Set `SKILL_ROOT` to that runtime's existing skill directory, and repeat for other detected runtimes. If a copy already exists, review its differences before replacing it.
 
 ```bash
-for root in ~/.codex/skills ~/.claude/skills ~/.hermes/skills; do
-  install -d "$root/personal-voice"
-  install -m 644 examples/personal-voice-skill/SKILL.md \
-    "$root/personal-voice/SKILL.md"
-done
+SKILL_ROOT=~/.codex/skills
+test -d "$SKILL_ROOT"
+install -d -m 755 "$SKILL_ROOT/personal-voice"
+install -m 644 examples/personal-voice-skill/SKILL.md \
+  "$SKILL_ROOT/personal-voice/SKILL.md"
 ```
 
 Start a new agent session after installation. Other agent runtimes can use the same `SKILL.md` as long as they can run local commands and write private input through process stdin.
