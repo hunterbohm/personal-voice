@@ -14,7 +14,7 @@ complete draft from the calling model
 
 - Apple Silicon Mac
 - Python 3.11 or newer
-- `mlx-lm==0.31.1` and `transformers==5.5.0`
+- `mlx-lm==0.31.1` and `transformers==5.17.0`
 - A pinned local 4-bit MLX instruct model snapshot
 - A local teacher model; the documented path uses Ollama with `qwen3.5:9b`
 - Enough private disk space for datasets, checkpoints, and the base model
