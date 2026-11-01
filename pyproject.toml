@@ -24,7 +24,7 @@ classifiers = [
 [project.optional-dependencies]
 renderer = [
   "mlx-lm==0.31.1",
-  "transformers==5.5.0",
+  "transformers==5.17.0",
 ]
 
 [project.scripts]
